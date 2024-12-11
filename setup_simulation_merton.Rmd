@@ -1,0 +1,495 @@
+---
+title: "Simulation setup merton model"
+output: html_document
+---
+
+### Initialization
+
+```{r, echo=FALSE}
+
+# Clear variables
+rm (list=ls())
+
+# Settings for simulation grid
+tFinal   <- 40                      # Final time --> naar 40 yr?
+deltaT   <- 1                       # Time step
+timeGrid <- seq(0, tFinal, deltaT)  # Time grid
+nGrid    <- length(timeGrid)        # Time grid size
+nSim     <- 10000                   # Number of simulated paths
+
+# Settings for option formula and stochastic process
+mu    <- 0.05 #is mu of risky asset
+rfr   <- 0.01
+sigma  <- 0.15 #is sigma of risky asset
+s0     <- 1
+gamma  <- 4.3
+
+f_0 <- 1
+h_t <- 0
+m_max <- 1
+mvt_bar <- (mu - rfr) / (sigma^2 * gamma)
+
+jaar_salaris <- 30000 #input
+franchise <- 17000
+max_pensioengevend_salaris <- 137800
+premie_afdracht <- 0.0175
+premium_growth_rate <- 0.03
+pensioengrondslag <- min(max_pensioengevend_salaris, jaar_salaris - franchise)
+premie <- pensioengrondslag * premie_afdracht
+```
+
+### Simulate Brownian motion
+
+```{r, echo=FALSE}
+    
+# Generate Brownian motion increments 
+deltaW <- sqrt(deltaT) * matrix(rnorm(nSim/2*(nGrid-1)), ncol = nSim/2)
+
+# Use antithetic sampling (variance reduction technique) 
+deltaW <- cbind(deltaW,-deltaW)
+
+# Compute Brownian motion paths
+browMot <-  apply(deltaW, 2, cumsum)
+
+# Add zeros as initial values
+browMot <- rbind(integer(nSim),browMot)
+
+# Simulate geometric Brownian motion (risk neutral)
+geoBrowMot  <- s0*exp((mu - sigma^2/2) * timeGrid + sigma * browMot)
+
+```
+
+Above we have simulated geometric Brownian motion directly based on the analytically solution. We can also simulate geometric Brownian motion using a loop over time. This technique can later also be applied for more complex processes when no analytic solution is available.
+
+
+#### Naar assignment toe
+Eerst human capital bepalen: elk jaar premie h erbij. Impliciete aanname dat jaar/maand premieafdracht geen impact heeft op opbouw --> maandelijkse toekenning van rendement wordt genegeerd bij berekening van present values. 
+```{r}
+nSteps <- nGrid - 1
+human_capital <- h_t*matrix(1, nGrid, 1)
+
+
+for (iStep in 1:nSteps) {
+  future_premiums <- matrix(0, nGrid - iStep, 1)
+  
+  for (iPremium in 1:(nGrid - iStep)) {
+    future_premiums[iPremium, 1] <- premie * deltaT * exp(-(rfr - premium_growth_rate) * (iPremium - iStep))
+  }
+  
+  if (iStep == 1) {
+    print(future_premiums)
+  }
+  
+  human_capital[iStep, 1] <- sum(future_premiums)
+}
+
+print(human_capital)
+```
+
+
+
+```{r}
+financial_capital <- f_0*matrix(1, nGrid, nSim) #F
+investment_fraction <- m_max*matrix(1, nGrid, nSim) #m_t
+financial_fraction <- ((f_0 + human_capital[1,1])/f_0)*matrix(1, nGrid, nSim) #F + H / F
+
+  #Doel F_(t+1) bepalen gegeven F_t -> daarna m_(t+1) bepalen
+for(iStep in 1:nSteps){
+  #F_t bepalen
+  financial_capital[iStep+1,]  <- (1-investment_fraction[iStep, 1])* exp(rfr * deltaT)*financial_capital[iStep,] + investment_fraction[iStep, 1] * (geoBrowMot[iStep+1,] / geoBrowMot[iStep,]) * financial_capital[iStep,] + premie * deltaT * exp(rfr * deltaT)
+  
+  # Fractie (F_t + H_t) / F_t bepalen
+  financial_fraction[iStep + 1,] <- (financial_capital[iStep+1,] + human_capital[iStep+1,]) / financial_capital[iStep+1,]
+  
+  # m_t bepalen
+  investment_fraction[iStep + 1,] <- pmin(m_max, mvt_bar * financial_fraction[iStep + 1,])
+}
+
+```
+
+
+```{r}
+plot(rowMeans(investment_fraction))
+
+cbind(Age=seq(68-tFinal, 68, by=1), Fraction_risky = rowMeans(investment_fraction))
+```
+
+
+```{r}
+tFinal   <- 40                      # Final time --> naar 40 yr?
+deltaT   <- 1                       # Time step
+nSim     <- 10000                   # Number of simulated paths
+
+# Settings for option formula and stochastic process
+mu    <- 0.05 #is mu of risky asset
+rfr   <- 0.01
+sigma  <- 0.15 #is sigma of risky asset
+s0     <- 1
+gamma  <- 4.3
+
+f_0 <- 1
+h_t <- 0
+m_max <- 1
+
+jaar_salaris <- 30000 #input
+franchise <- 17000
+max_pensioengevend_salaris <- 137800
+premie_afdracht <- 0.0175
+
+get_lifecycle <- function(tFinal, deltaT, nSim, mu, rfr, sigma, s0, gamma, f_0, h_t, m_max, jaar_salaris, franchise, max_pensioengevend_salaris, premie_afdracht, premium_growth_rate){
+  #inputs afmaken
+  timeGrid <- seq(0, tFinal, deltaT)
+  nGrid <- length(timeGrid)
+  mvt_bar <- (mu - rfr) / (sigma^2 * gamma)
+  pensioengrondslag <- min(max_pensioengevend_salaris, jaar_salaris - franchise)
+  premie <- pensioengrondslag * premie_afdracht
+  
+  ########################################
+  # Generate Brownian motion increments ##
+  ########################################
+  deltaW <- sqrt(deltaT) * matrix(rnorm(nSim/2*(nGrid-1)), ncol = nSim/2)
+
+  # Use antithetic sampling (variance reduction technique) 
+  deltaW <- cbind(deltaW,-deltaW)
+
+  # Compute Brownian motion paths
+  browMot <-  apply(deltaW, 2, cumsum)
+
+  # Add zeros as initial values
+  browMot <- rbind(integer(nSim),browMot)
+
+  # Simulate geometric Brownian motion (risk neutral)
+  geoBrowMot  <- s0*exp((mu - sigma^2/2) * timeGrid + sigma * browMot)
+  
+  ################################
+  ### Generate human capital ####
+  ##############################
+  nSteps <- nGrid - 1
+  human_capital <- h_t*matrix(1, nGrid, 1)
+
+  
+for (iStep in 1:nSteps) {
+  future_premiums <- matrix(0, nGrid - iStep, 1)
+  
+  for (iPremium in 1:(nGrid - iStep)) {
+    future_premiums[iPremium, 1] <- premie * deltaT * exp(-(rfr - premium_growth_rate)* (iPremium - iStep))
+  }
+  
+  human_capital[iStep, 1] <- sum(future_premiums)
+}
+  
+  #####################
+  #### Financial ######
+  #####################
+  financial_capital <- f_0*matrix(1, nGrid, nSim) #F
+investment_fraction <- m_max*matrix(1, nGrid, nSim) #m_t
+financial_fraction <- ((f_0 + human_capital[1,1])/f_0)*matrix(1, nGrid, nSim) #F + H / F
+
+  #Doel F_(t+1) bepalen gegeven F_t -> daarna m_(t+1) bepalen
+for(iStep in 1:nSteps){
+  #F_t bepalen
+  financial_capital[iStep+1,]  <- (1-investment_fraction[iStep, 1])* exp(rfr * deltaT)*financial_capital[iStep,] + investment_fraction[iStep, 1] * (geoBrowMot[iStep+1,] / geoBrowMot[iStep,]) * financial_capital[iStep,] + premie * deltaT * exp(rfr * deltaT)
+  
+  # Fractie (F_t + H_t) / F_t bepalen
+  financial_fraction[iStep + 1,] <- (financial_capital[iStep+1,] + human_capital[iStep+1,]) / financial_capital[iStep+1,]
+  
+  # m_t bepalen
+  investment_fraction[iStep + 1,] <- pmin(m_max, mvt_bar * financial_fraction[iStep + 1,])
+}
+
+lifeCycle <- rowMeans(investment_fraction)
+
+#### resultaten maken #####
+resulten_list <- list(human_capital = human_capital, 
+                      financial_capital = financial_capital, 
+                      financial_fraction = financial_fraction, 
+                      investment_fraction = investment_fraction, 
+                      lifecycle = lifeCycle)
+  
+return(resulten_list)
+}
+```
+
+
+
+```{r}
+gamma_vector <-  c(4.6,	3.1,	2.1)
+horizon <- 40
+res_lifecycles <- data.frame(age=c(), m_t=c(), lifecycle=c())
+
+for (i in 1:length(gamma_vector)){
+ temp <- get_lifecycle(tFinal = horizon, 
+              deltaT = 1, 
+              nSim = 10000, 
+              mu = 0.053, 
+              rfr = 0.025, 
+              sigma = 0.173, 
+              s0 = 1, 
+              gamma = gamma_vector[i], 
+              f_0 = 1, 
+              h_t = 0,
+              m_max = 1,
+              jaar_salaris = 30000, 
+              franchise = 17000,
+              max_pensioengevend_salaris = 137800, 
+              premie_afdracht = 0.0175,
+              premium_growth_rate = 0.03)
+  
+ res_lifecycles <- rbind(res_lifecycles, data.frame(age=(68-horizon):68, m_t=temp$lifecycle, lifecycle=toString(gamma_vector[i])))
+}
+
+head(res_lifecycles)
+
+library(ggplot2)
+ggplot(res_lifecycles) + 
+  geom_line(aes(x=age,y=m_t, linetype = lifecycle), lwd=1)+ #can ook linetype vervangen door colour
+  labs(title = "Share of financial wealth invested in risky assets", y= "Share", x = "Age", linetype="Risk aversion (γ)") + 
+  ylim(c(0,1))+
+  theme_minimal()
+
+```
+
+
+
+
+```{r}
+get_lifecycle_switch <- function(tFinal, deltaT, nSim, mu, rfr, sigma, s0, gamma, f_0, h_t, m_max, jaar_salaris, franchise, max_pensioengevend_salaris, premie_afdracht, premium_growth_rate, gamma_end, switch_x_years_before_end){
+  #inputs afmaken
+  timeGrid <- seq(0, tFinal, deltaT)
+  nGrid <- length(timeGrid)
+  pensioengrondslag <- min(max_pensioengevend_salaris, jaar_salaris - franchise)
+  premie <- pensioengrondslag * premie_afdracht
+  
+  ########################################
+  # Generate Brownian motion increments ##
+  ########################################
+  deltaW <- sqrt(deltaT) * matrix(rnorm(nSim/2*(nGrid-1)), ncol = nSim/2)
+
+  # Use antithetic sampling (variance reduction technique) 
+  deltaW <- cbind(deltaW,-deltaW)
+
+  # Compute Brownian motion paths
+  browMot <-  apply(deltaW, 2, cumsum)
+
+  # Add zeros as initial values
+  browMot <- rbind(integer(nSim),browMot)
+
+  # Simulate geometric Brownian motion (risk neutral)
+  geoBrowMot  <- s0*exp((mu - sigma^2/2) * timeGrid + sigma * browMot)
+  
+  ################################
+  ### Generate human capital ####
+  ##############################
+  nSteps <- nGrid - 1
+  human_capital <- h_t*matrix(1, nGrid, 1)
+
+  
+for (iStep in 1:nSteps) {
+  future_premiums <- matrix(0, nGrid - iStep, 1)
+  
+  for (iPremium in 1:(nGrid - iStep)) {
+    future_premiums[iPremium, 1] <- premie * deltaT * exp(-(rfr - premium_growth_rate)* (iPremium - iStep))
+  }
+  
+  human_capital[iStep, 1] <- sum(future_premiums)
+}
+  
+  #####################
+  #### Financial ######
+  #####################
+  financial_capital <- f_0*matrix(1, nGrid, nSim) #F
+investment_fraction <- m_max*matrix(1, nGrid, nSim) #m_t
+financial_fraction <- ((f_0 + human_capital[1,1])/f_0)*matrix(1, nGrid, nSim) #F + H / F
+
+  #Doel F_(t+1) bepalen gegeven F_t -> daarna m_(t+1) bepalen
+for(iStep in 1:nSteps){
+  #F_t bepalen
+  financial_capital[iStep+1,]  <- (1-investment_fraction[iStep, 1])* exp(rfr * deltaT)*financial_capital[iStep,] + investment_fraction[iStep, 1] * (geoBrowMot[iStep+1,] / geoBrowMot[iStep,]) * financial_capital[iStep,] + premie * deltaT * exp(rfr * deltaT)
+  
+  # Fractie (F_t + H_t) / F_t bepalen
+  financial_fraction[iStep + 1,] <- (financial_capital[iStep+1,] + human_capital[iStep+1,]) / financial_capital[iStep+1,]
+  
+  #mvt_bar updaten afhankelijk van periode
+  gamma_used <- ifelse(iStep <= tFinal - switch_x_years_before_end , gamma, gamma_end)
+  
+  print(gamma_used)
+  mvt_bar <- (mu - rfr) / (sigma^2 * gamma_used)
+  
+  # m_t bepalen
+  investment_fraction[iStep + 1,] <- pmin(m_max, mvt_bar * financial_fraction[iStep + 1,])
+}
+
+lifeCycle <- rowMeans(investment_fraction)
+
+#### resultaten maken #####
+resulten_list <- list(human_capital = human_capital, 
+                      financial_capital = financial_capital, 
+                      financial_fraction = financial_fraction, 
+                      investment_fraction = investment_fraction, 
+                      lifecycle = lifeCycle)
+  
+return(resulten_list)
+}
+```
+
+```{r}
+gamma_vector <- c(2, 2.5, 3, 4, 8)
+horizon <- 40
+res_lifecycles_switch <- data.frame(age=c(), m_t=c(), lifecycle=c())
+
+for (i in 1:length(gamma_vector)){
+  print(paste("new gamma of value ", gamma_vector[i], sep = ""))
+ temp <- get_lifecycle_switch(tFinal = horizon, 
+              deltaT = 1, 
+              nSim = 10000, 
+              mu = 0.05, 
+              rfr = 0.01, 
+              sigma = 0.15, 
+              s0 = 1, 
+              gamma = gamma_vector[i], 
+              f_0 = 1, 
+              h_t = 0,
+              m_max = 1,
+              jaar_salaris = 30000, 
+              franchise = 17000,
+              max_pensioengevend_salaris = 137800, 
+              premie_afdracht = 0.0175,
+              premium_growth_rate = 0.03,
+              gamma_end = gamma_vector[3],
+              switch_x_years_before_end = 10)
+  
+ res_lifecycles_switch <- rbind(res_lifecycles_switch, data.frame(age=(68-horizon):68, m_t=temp$lifecycle, lifecycle=paste("gamma", gamma_vector[i], sep = "_")))
+}
+
+head(res_lifecycles_switch)
+ggplot(res_lifecycles_switch) + 
+  geom_line(aes(x=age,y=m_t, linetype = lifecycle), lwd=1)+ #can ook linetype vervangen door colour
+  labs(title = "Share of financial wealth invested in risky assets", y= "Share", x = "Age", linetype="Risk aversion") + 
+  theme_minimal()
+```
+
+
+
+
+### Ingroeien naar default
+
+```{r}
+get_lifecycle_ingroeien <- function(tFinal, deltaT, nSim, mu, rfr, sigma, s0, gamma, f_0, h_t, m_max, jaar_salaris, franchise, max_pensioengevend_salaris, premie_afdracht, premium_growth_rate, gamma_end, switch_x_years_before_end){
+  #inputs afmaken
+  timeGrid <- seq(0, tFinal, deltaT)
+  nGrid <- length(timeGrid)
+  pensioengrondslag <- min(max_pensioengevend_salaris, jaar_salaris - franchise)
+  premie <- pensioengrondslag * premie_afdracht
+  
+  ########################################
+  # Generate Brownian motion increments ##
+  ########################################
+  deltaW <- sqrt(deltaT) * matrix(rnorm(nSim/2*(nGrid-1)), ncol = nSim/2)
+
+  # Use antithetic sampling (variance reduction technique) 
+  deltaW <- cbind(deltaW,-deltaW)
+
+  # Compute Brownian motion paths
+  browMot <-  apply(deltaW, 2, cumsum)
+
+  # Add zeros as initial values
+  browMot <- rbind(integer(nSim),browMot)
+
+  # Simulate geometric Brownian motion (risk neutral)
+  geoBrowMot  <- s0*exp((mu - sigma^2/2) * timeGrid + sigma * browMot)
+  
+  ################################
+  ### Generate human capital ####
+  ##############################
+  nSteps <- nGrid - 1
+  human_capital <- h_t*matrix(1, nGrid, 1)
+
+  
+for (iStep in 1:nSteps) {
+  future_premiums <- matrix(0, nGrid - iStep, 1)
+  
+  for (iPremium in 1:(nGrid - iStep)) {
+    future_premiums[iPremium, 1] <- premie * deltaT * exp(-(rfr - premium_growth_rate)* (iPremium - iStep))
+  }
+  
+  human_capital[iStep, 1] <- sum(future_premiums)
+}
+  
+  #####################
+  #### Financial ######
+  #####################
+  financial_capital <- f_0*matrix(1, nGrid, nSim) #F
+investment_fraction <- m_max*matrix(1, nGrid, nSim) #m_t
+financial_fraction <- ((f_0 + human_capital[1,1])/f_0)*matrix(1, nGrid, nSim) #F + H / F
+
+  #Doel F_(t+1) bepalen gegeven F_t -> daarna m_(t+1) bepalen
+for(iStep in 1:nSteps){
+  #F_t bepalen
+  financial_capital[iStep+1,]  <- (1-investment_fraction[iStep, 1])* exp(rfr * deltaT)*financial_capital[iStep,] + investment_fraction[iStep, 1] * (geoBrowMot[iStep+1,] / geoBrowMot[iStep,]) * financial_capital[iStep,] + premie * deltaT * exp(rfr * deltaT)
+  
+  # Fractie (F_t + H_t) / F_t bepalen
+  financial_fraction[iStep + 1,] <- (financial_capital[iStep+1,] + human_capital[iStep+1,]) / financial_capital[iStep+1,]
+  
+  #mvt_bar updaten afhankelijk van periode
+  ratio <- max(0,(iStep - tFinal + switch_x_years_before_end))/switch_x_years_before_end
+  gamma_used <- gamma*(1-ratio) + gamma_end*ratio
+  # print(gamma_used)
+  
+  mvt_bar <- (mu - rfr) / (sigma^2 * gamma_used)
+  
+  # m_t bepalen
+  investment_fraction[iStep + 1,] <- pmin(m_max, mvt_bar * financial_fraction[iStep + 1,])
+}
+
+lifeCycle <- rowMeans(investment_fraction)
+
+#### resultaten maken #####
+resulten_list <- list(human_capital = human_capital, 
+                      financial_capital = financial_capital, 
+                      financial_fraction = financial_fraction, 
+                      investment_fraction = investment_fraction, 
+                      lifecycle = lifeCycle)
+  
+return(resulten_list)
+}
+```
+
+```{r}
+gamma_vector <- c(4.6,	3.1,	2.1)
+horizon <- 40
+res_lifecycles_ingroeien <- data.frame(age=c(), m_t=c(), lifecycle=c())
+
+for (i in 1:length(gamma_vector)){
+  print(paste("new gamma of value ", gamma_vector[i], sep = ""))
+ temp <- get_lifecycle_ingroeien(tFinal = horizon, 
+              deltaT = 1, 
+              nSim = 10000, 
+              mu = 0.053, 
+              rfr = 0.025, 
+              sigma = 0.173, 
+              s0 = 1, 
+              gamma = gamma_vector[i], 
+              f_0 = 1, 
+              h_t = 0,
+              m_max = 1,
+              jaar_salaris = 30000, 
+              franchise = 17000,
+              max_pensioengevend_salaris = 137800, 
+              premie_afdracht = 0.0175,
+              premium_growth_rate = 0.03,
+              gamma_end = 4.1,
+              switch_x_years_before_end = 10)
+  
+ res_lifecycles_ingroeien <- rbind(res_lifecycles_ingroeien, data.frame(age=(68-horizon):68, m_t=temp$lifecycle, lifecycle=toString(gamma_vector[i])))
+}
+
+head(res_lifecycles_ingroeien)
+ggplot(res_lifecycles_ingroeien) + 
+  geom_line(aes(x=age,y=m_t, linetype = lifecycle), lwd=1)+ #can ook linetype vervangen door colour
+  labs(title = "Share of financial wealth invested in risky assets", y= "Share", x = "Age", linetype="Risk aversion (γ)") + 
+  ylim(c(0,1))+
+  theme_minimal()
+```
+
+
+
